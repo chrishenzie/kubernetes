@@ -201,20 +201,12 @@ func MakeSecPod(podConfig *Config) (*v1.Pod, error) {
 			Namespace: podConfig.NS,
 		},
 		Spec: v1.PodSpec{
-			HostIPC: podConfig.HostIPC,
-			HostPID: podConfig.HostPID,
-			SecurityContext: &v1.PodSecurityContext{
-				FSGroup: podConfig.FsGroup,
-			},
 			Containers: []v1.Container{
 				{
 					Name:    "write-pod",
 					Image:   imageutils.GetE2EImage(image),
 					Command: []string{"/bin/sh"},
 					Args:    []string{"-c", podConfig.Command},
-					SecurityContext: &v1.SecurityContext{
-						Privileged: &podConfig.IsPrivileged,
-					},
 				},
 			},
 			RestartPolicy: v1.RestartPolicyOnFailure,
@@ -250,9 +242,6 @@ func MakeSecPod(podConfig *Config) (*v1.Pod, error) {
 	podSpec.Spec.Containers[0].VolumeMounts = volumeMounts
 	podSpec.Spec.Containers[0].VolumeDevices = volumeDevices
 	podSpec.Spec.Volumes = volumes
-	if runtime.GOOS != "windows" {
-		podSpec.Spec.SecurityContext.SELinuxOptions = podConfig.SeLinuxLabel
-	}
 
 	SetNodeSelection(&podSpec.Spec, podConfig.NodeSelection)
 	return podSpec, nil
