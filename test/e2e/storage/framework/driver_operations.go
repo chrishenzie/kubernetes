@@ -57,6 +57,9 @@ func CopyStorageClass(sc *storagev1.StorageClass, ns string, suffix string) *sto
 	copy := sc.DeepCopy()
 	copy.ObjectMeta.Name = names.SimpleNameGenerator.GenerateName(ns + "-" + suffix)
 	copy.ResourceVersion = ""
+	// Enforce immediate binding so pod start time is not affected.
+	mode := storagev1.VolumeBindingImmediate
+	copy.VolumeBindingMode = &mode
 	return copy
 }
 

@@ -20,7 +20,10 @@ package testsuites
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/onsi/ginkgo"
 
@@ -195,9 +198,21 @@ func (t *volumeStressTestSuite) DefineTests(driver storageframework.TestDriver, 
 		createPodsAndVolumes()
 	})
 
+	var (
+		startTimes = []time.Duration{}
+		mu         sync.Mutex
+	)
+
+	reportStartTimes := func() {
+		for _, time := range startTimes {
+			fmt.Println(time)
+		}
+	}
+
 	// See #96177, this is necessary for cleaning up resources when tests are interrupted.
 	f.AddAfterEach("cleanup", func(f *framework.Framework, failed bool) {
 		cleanup()
+		reportStartTimes()
 	})
 
 	ginkgo.It("multiple pods should access different volumes repeatedly [Slow] [Serial]", func() {
@@ -215,17 +230,23 @@ func (t *volumeStressTestSuite) DefineTests(driver storageframework.TestDriver, 
 					default:
 						pod := l.pods[podIndex]
 						framework.Logf("Pod-%v [%v], Iteration %v/%v", podIndex, pod.Name, j, l.testOptions.NumRestarts-1)
+
+						now := time.Now()
 						_, err := cs.CoreV1().Pods(pod.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 						if err != nil {
 							l.cancel()
 							framework.Failf("Failed to create pod-%v [%+v]. Error: %v", podIndex, pod, err)
 						}
 
-						err = e2epod.WaitTimeoutForPodRunningInNamespace(cs, pod.Name, pod.Namespace, f.Timeouts.PodStart)
+						err = e2epod.WaitTimeoutForPodRunningInNamespace(cs, pod.Name, pod.Namespace, f.Timeouts.PodStartSlow)
 						if err != nil {
 							l.cancel()
 							framework.Failf("Failed to wait for pod-%v [%+v] turn into running status. Error: %v", podIndex, pod, err)
 						}
+
+						mu.Lock()
+						startTimes = append(startTimes, time.Since(now))
+						mu.Unlock()
 
 						// TODO: write data per pod and validate it everytime
 
@@ -240,5 +261,10 @@ func (t *volumeStressTestSuite) DefineTests(driver storageframework.TestDriver, 
 		}
 
 		l.wg.Wait()
+
+		// TODO: Bucket this once you get some general times.
+		sort.Slice(startTimes, func(i, j int) bool {
+			return startTimes[i] < startTimes[j]
+		})
 	})
 }
