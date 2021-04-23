@@ -28,6 +28,7 @@ import (
 	"github.com/onsi/ginkgo"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -129,13 +130,33 @@ func (t *volumeStressTestSuite) DefineTests(driver storageframework.TestDriver, 
 	}
 
 	createPodsAndVolumes := func() {
+		scName := "standard-rwx-retain"
+		pvc := v1.PersistentVolumeClaim{
+			Spec: v1.PersistentVolumeClaimSpec{
+				AccessModes: []v1.PersistentVolumeAccessMode{
+					v1.ReadWriteMany,
+				},
+				StorageClassName: &scName,
+				Resources: v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceStorage: resource.MustParse("100Gi"),
+					},
+				},
+				VolumeName: "pvc-599dcb7d-c32a-4fbe-b40c-594668b6ea0f",
+			},
+		}
+		pvc.Name = "test-pvc"
+		pvc.Namespace = f.Namespace.Name
+
+		if _, err := cs.CoreV1().PersistentVolumeClaims(pvc.Namespace).Create(context.TODO(), &pvc, metav1.CreateOptions{}); err != nil {
+			framework.Failf("Failed to create pvc [%+v]. Error: %v", pvc.Name, err)
+		}
+
 		for i := 0; i < l.testOptions.NumPods; i++ {
 			framework.Logf("Creating resources for pod %v/%v", i, l.testOptions.NumPods-1)
-			r := storageframework.CreateVolumeResource(driver, l.config, pattern, t.GetTestSuiteInfo().SupportedSizeRange)
-			l.volumes = append(l.volumes, r)
 			podConfig := e2epod.Config{
 				NS:           f.Namespace.Name,
-				PVCs:         []*v1.PersistentVolumeClaim{r.Pvc},
+				PVCs:         []*v1.PersistentVolumeClaim{&pvc},
 				SeLinuxLabel: e2epv.SELinuxLabel,
 			}
 			pod, err := e2epod.MakeSecPod(&podConfig)
@@ -185,8 +206,8 @@ func (t *volumeStressTestSuite) DefineTests(driver storageframework.TestDriver, 
 						now := time.Now()
 						_, err := cs.CoreV1().Pods(pod.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 						if err != nil {
-							l.cancel()
-							framework.Failf("Failed to create pod-%v [%+v]. Error: %v", podIndex, pod, err)
+							framework.Logf("CHRIS: Failed to create pod-%v [%+v]. Error: %v", podIndex, pod, err)
+							continue
 						}
 
 						err = e2epod.WaitTimeoutForPodRunningInNamespace(cs, pod.Name, pod.Namespace, f.Timeouts.PodStartSlow)
