@@ -29,14 +29,12 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	errors "k8s.io/apimachinery/pkg/util/errors"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2epv "k8s.io/kubernetes/test/e2e/framework/pv"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	storageframework "k8s.io/kubernetes/test/e2e/storage/framework"
-	storageutils "k8s.io/kubernetes/test/e2e/storage/utils"
 )
 
 type volumeStressTestSuite struct {
@@ -147,52 +145,6 @@ func (t *volumeStressTestSuite) DefineTests(driver storageframework.TestDriver, 
 		}
 	}
 
-	cleanup := func() {
-		framework.Logf("Stopping and waiting for all test routines to finish")
-		l.cancel()
-		l.wg.Wait()
-
-		var (
-			errs []error
-			mu   sync.Mutex
-			wg   sync.WaitGroup
-		)
-
-		wg.Add(len(l.pods))
-		for _, pod := range l.pods {
-			go func(pod *v1.Pod) {
-				defer ginkgo.GinkgoRecover()
-				defer wg.Done()
-
-				framework.Logf("Deleting pod %v", pod.Name)
-				err := e2epod.DeletePodWithWait(cs, pod)
-				mu.Lock()
-				defer mu.Unlock()
-				errs = append(errs, err)
-			}(pod)
-		}
-		wg.Wait()
-
-		wg.Add(len(l.volumes))
-		for _, volume := range l.volumes {
-			go func(volume *storageframework.VolumeResource) {
-				defer ginkgo.GinkgoRecover()
-				defer wg.Done()
-
-				framework.Logf("Deleting volume %s", volume.Pvc.GetName())
-				err := volume.CleanupResource()
-				mu.Lock()
-				defer mu.Unlock()
-				errs = append(errs, err)
-			}(volume)
-		}
-		wg.Wait()
-
-		errs = append(errs, storageutils.TryFunc(l.driverCleanup))
-		framework.ExpectNoError(errors.NewAggregate(errs), "while cleaning up resource")
-		l.migrationCheck.validateMigrationVolumeOpCounts()
-	}
-
 	ginkgo.BeforeEach(func() {
 		init()
 		createPodsAndVolumes()
@@ -211,7 +163,6 @@ func (t *volumeStressTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 	// See #96177, this is necessary for cleaning up resources when tests are interrupted.
 	f.AddAfterEach("cleanup", func(f *framework.Framework, failed bool) {
-		cleanup()
 		reportStartTimes()
 	})
 
