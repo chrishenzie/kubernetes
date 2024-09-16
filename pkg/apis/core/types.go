@@ -2963,6 +2963,8 @@ const (
 type ContainerRestartPolicy string
 
 const (
+	// TODO: Note that there is no "Never" for containers -- we would
+	// probably need to add it.
 	ContainerRestartPolicyAlways ContainerRestartPolicy = "Always"
 )
 

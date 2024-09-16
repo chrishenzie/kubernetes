@@ -4985,11 +4985,8 @@ func validatePodSpecSecurityContext(securityContext *core.PodSecurityContext, sp
 
 func ValidateContainerUpdates(newContainers, oldContainers []core.Container, fldPath *field.Path) (allErrs field.ErrorList, stop bool) {
 	allErrs = field.ErrorList{}
-	if len(newContainers) != len(oldContainers) {
-		// TODO: Pinpoint the specific container that causes the invalid error after we have strategic merge diff
-		allErrs = append(allErrs, field.Forbidden(fldPath, "pod updates may not add or remove containers"))
-		return allErrs, true
-	}
+	// TODO: Deleted the check where we compare lengths of old and new
+	// containers because when you add a container the lengths will differ.
 
 	// validate updated container images
 	for i, ctr := range newContainers {
@@ -5175,6 +5172,11 @@ func ValidatePodUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions) fiel
 	// munge spec.containers[*].image
 	var newContainers []core.Container
 	for ix, container := range mungedPodSpec.Containers {
+		// TODO: When you add a container, this fails because a
+		// container at this index didn't exist previously.
+		if ix >= len(oldPod.Spec.Containers) {
+			break
+		}
 		container.Image = oldPod.Spec.Containers[ix].Image // +k8s:verify-mutation:reason=clone
 		// When the feature-gate is turned off, any new requests attempting to update CPU or memory
 		// resource values will result in validation failure.
@@ -5275,18 +5277,12 @@ func ValidatePodUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions) fiel
 		// Those features automatically generate the matchExpressions in labelSelector for PodAffinity/PodAntiAffinity when the Pod is created.
 		// When we make them mutable, we need to make sure things like how to handle/validate matchLabelKeys,
 		// and what if the fieldManager/A sets matchexpressions and fieldManager/B sets matchLabelKeys later. (could it lead the understandable conflict, etc)
+
+		// TODO: I removed checking the podSpecs for equality to
+		// support deleting pods. I think to fix this I just need to
+		// copy podSpec.containers.
 	}
 
-	if !apiequality.Semantic.DeepEqual(mungedPodSpec, oldPod.Spec) {
-		// This diff isn't perfect, but it's a helluva lot better an "I'm not going to tell you what the difference is".
-		// TODO: Pinpoint the specific field that causes the invalid error after we have strategic merge diff
-		specDiff := cmp.Diff(oldPod.Spec, mungedPodSpec)
-		errs := field.Forbidden(specPath, fmt.Sprintf("pod updates may not change fields other than %s\n%v", strings.Join(updatablePodSpecFieldsNoResources, ","), specDiff))
-		if utilfeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling) {
-			errs = field.Forbidden(specPath, fmt.Sprintf("pod updates may not change fields other than %s\n%v", strings.Join(updatablePodSpecFields, ","), specDiff))
-		}
-		allErrs = append(allErrs, errs)
-	}
 	return allErrs
 }
 
