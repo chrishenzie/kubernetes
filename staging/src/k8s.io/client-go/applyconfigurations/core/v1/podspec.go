@@ -226,6 +226,7 @@ type PodSpecApplyConfiguration struct {
 	// - spec.containers[*].securityContext.procMount
 	// - spec.containers[*].securityContext.runAsUser
 	// - spec.containers[*].securityContext.runAsGroup
+	// - spec.containers[*].securityContext.cgroupOptions
 	OS *PodOSApplyConfiguration `json:"os,omitempty"`
 	// Use the host's user namespace.
 	// Optional: Default to true.
