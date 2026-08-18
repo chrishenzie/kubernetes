@@ -8925,6 +8925,9 @@ func TestValidateEphemeralContainers(t *testing.T) {
 		"Single Container": {
 			{EphemeralContainerCommon: core.EphemeralContainerCommon{Name: "debug", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: "File"}},
 		},
+		"Empty SecurityContext": {
+			{EphemeralContainerCommon: core.EphemeralContainerCommon{Name: "debug", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: "File", SecurityContext: &core.SecurityContext{}}},
+		},
 		"Multiple Containers": {
 			{EphemeralContainerCommon: core.EphemeralContainerCommon{Name: "debug1", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: "File"}},
 			{EphemeralContainerCommon: core.EphemeralContainerCommon{Name: "debug2", Image: "image", ImagePullPolicy: "IfNotPresent", TerminationMessagePolicy: "File"}},
@@ -8993,6 +8996,39 @@ func TestValidateEphemeralContainers(t *testing.T) {
 		ephemeralContainers []core.EphemeralContainer
 		expectedErrors      field.ErrorList
 	}{{
+		"Forbidden CgroupOptions",
+		line(),
+		[]core.EphemeralContainer{{
+			EphemeralContainerCommon: core.EphemeralContainerCommon{
+				Name:                     "empty",
+				Image:                    "image",
+				ImagePullPolicy:          "IfNotPresent",
+				TerminationMessagePolicy: "File",
+				SecurityContext:          &core.SecurityContext{CgroupOptions: &core.CgroupOptions{}},
+			},
+		}, {
+			EphemeralContainerCommon: core.EphemeralContainerCommon{
+				Name:                     "readonly",
+				Image:                    "image",
+				ImagePullPolicy:          "IfNotPresent",
+				TerminationMessagePolicy: "File",
+				SecurityContext:          &core.SecurityContext{CgroupOptions: &core.CgroupOptions{MountMode: ptr.To(core.CgroupMountModeReadOnly)}},
+			},
+		}, {
+			EphemeralContainerCommon: core.EphemeralContainerCommon{
+				Name:                     "writable",
+				Image:                    "image",
+				ImagePullPolicy:          "IfNotPresent",
+				TerminationMessagePolicy: "File",
+				SecurityContext:          &core.SecurityContext{CgroupOptions: &core.CgroupOptions{MountMode: ptr.To(core.CgroupMountModeWritable)}},
+			},
+		}},
+		field.ErrorList{
+			{Type: field.ErrorTypeForbidden, Field: "ephemeralContainers[0].securityContext.cgroupOptions"},
+			{Type: field.ErrorTypeForbidden, Field: "ephemeralContainers[1].securityContext.cgroupOptions"},
+			{Type: field.ErrorTypeForbidden, Field: "ephemeralContainers[2].securityContext.cgroupOptions"},
+		},
+	}, {
 		"Name Collision with Container.Containers",
 		line(),
 		[]core.EphemeralContainer{
@@ -24432,6 +24468,12 @@ func TestValidateWindowsSecurityContext(t *testing.T) {
 		errorMsg:    "cannot be set for a windows pod",
 		errorType:   "FieldValueForbidden",
 	}, {
+		name:        "pod with CgroupOptions",
+		sc:          &core.PodSpec{Containers: []core.Container{{SecurityContext: &core.SecurityContext{CgroupOptions: &core.CgroupOptions{MountMode: ptr.To(core.CgroupMountModeWritable)}}}}},
+		expectError: true,
+		errorMsg:    "cannot be set for a windows pod",
+		errorType:   "FieldValueForbidden",
+	}, {
 		name:        "pod with WindowsOptions, no error",
 		sc:          &core.PodSpec{Containers: []core.Container{{SecurityContext: &core.SecurityContext{WindowsOptions: &core.WindowsSecurityContextOptions{RunAsUserName: ptr.To("dummy")}}}}},
 		expectError: false,
@@ -24910,6 +24952,15 @@ func TestValidateSecurityContext(t *testing.T) {
 		Add: []core.Capability{"CAP_SYS_ADMIN"},
 	}
 
+	cgroupOptionsEmpty := fullValidSC()
+	cgroupOptionsEmpty.CgroupOptions = &core.CgroupOptions{}
+
+	cgroupMountModeReadOnly := fullValidSC()
+	cgroupMountModeReadOnly.CgroupOptions = &core.CgroupOptions{MountMode: ptr.To(core.CgroupMountModeReadOnly)}
+
+	cgroupMountModeWritable := fullValidSC()
+	cgroupMountModeWritable.CgroupOptions = &core.CgroupOptions{MountMode: ptr.To(core.CgroupMountModeWritable)}
+
 	successCases := map[string]struct {
 		sc            *core.SecurityContext
 		hostUsers     bool
@@ -24923,6 +24974,9 @@ func TestValidateSecurityContext(t *testing.T) {
 		"proc mount set":                         {procMountSet, true, false},
 		"proc mount unmasked":                    {procMountUnmasked, false, false},
 		"sys admin without privilege escalation": {sysAdminPriv, false, true},
+		"cgroup options empty":                   {cgroupOptionsEmpty, false, false},
+		"cgroup mount mode read-only":            {cgroupMountModeReadOnly, false, false},
+		"cgroup mount mode writable":             {cgroupMountModeWritable, false, false},
 	}
 	for k, v := range successCases {
 		if errs := ValidateSecurityContext(v.sc, field.NewPath("field"), v.hostUsers, v.allowSysAdmin); len(errs) != 0 {
@@ -24944,6 +24998,9 @@ func TestValidateSecurityContext(t *testing.T) {
 	capSysAdminWithoutEscalation := fullValidSC()
 	capSysAdminWithoutEscalation.Capabilities.Add = []core.Capability{"CAP_SYS_ADMIN"}
 	capSysAdminWithoutEscalation.AllowPrivilegeEscalation = ptr.To(false)
+
+	cgroupMountModeInvalid := fullValidSC()
+	cgroupMountModeInvalid.CgroupOptions = &core.CgroupOptions{MountMode: ptr.To(core.CgroupMountMode("Invalid"))}
 
 	errorCases := map[string]struct {
 		sc           *core.SecurityContext
@@ -24976,6 +25033,11 @@ func TestValidateSecurityContext(t *testing.T) {
 			sc:          procMountUnmasked,
 			errorType:   "FieldValueInvalid",
 			errorDetail: "`hostUsers` must be false to use `Unmasked`",
+		},
+		"with unsupported cgroup mount mode": {
+			sc:          cgroupMountModeInvalid,
+			errorType:   "FieldValueNotSupported",
+			errorDetail: `supported values: "ReadOnly", "Writable"`,
 		},
 	}
 	for k, v := range errorCases {
